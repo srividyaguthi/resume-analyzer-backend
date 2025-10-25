@@ -21,8 +21,7 @@ else:
 # Flask app + CORS
 # -----------------------------
 app = Flask(__name__)
-# You can allow all origins or restrict to your frontend URL
-CORS(app, supports_credentials=True)
+CORS(app)  # Allow all origins; safer than hardcoding localhost
 
 # -----------------------------
 # Utility: extract text from PDF
@@ -40,6 +39,16 @@ def extract_text_from_pdf(pdf_file):
     return text.strip()
 
 # -----------------------------
+# Root endpoint
+# -----------------------------
+@app.route("/", methods=["GET"])
+def index():
+    return (
+        "Resume Analyzer API is running! "
+        "Check /health for status or POST to /analyze with a resume PDF and jobRole."
+    )
+
+# -----------------------------
 # Health check
 # -----------------------------
 @app.route("/health", methods=["GET"])
@@ -55,19 +64,16 @@ def analyze_resume():
         if not GEMINI_API_KEY:
             return jsonify({"error": "GEMINI_API_KEY not set"}), 500
 
-        # Check if required fields exist
         if "resume" not in request.files or "jobRole" not in request.form:
-            return jsonify({"error": "Missing resume or jobRole"}), 400
+            return jsonify({"error": "Missing resume or job role"}), 400
 
         resume_file = request.files["resume"]
         job_role = request.form["jobRole"]
 
-        # Extract text from PDF
         resume_text = extract_text_from_pdf(resume_file)
         if not resume_text:
             return jsonify({"error": "Could not extract text from resume"}), 400
 
-        # Prepare prompt for AI
         valid_model_name = "models/gemini-2.5-flash"
         prompt = f"""
 You are an AI interview coach. Analyze the following resume for the role: {job_role}.
@@ -81,25 +87,20 @@ Provide:
 - Suggestions to improve resume for this job role.
 """
 
-        # Generate AI response safely
-        try:
-            model = genai.GenerativeModel(valid_model_name)
-            response = model.generate_content(prompt)
-            analysis_text = response.text
-        except Exception as ai_err:
-            print("AI model call failed:", ai_err)
-            return jsonify({"error": "AI model failed", "details": str(ai_err)}), 500
+        model = genai.GenerativeModel(valid_model_name)
+        response = model.generate_content(prompt)
+        analysis_text = response.text
 
         return jsonify({"analysis": analysis_text, "model_used": valid_model_name})
 
     except Exception as e:
-        print("Unexpected error:", traceback.format_exc())
-        return jsonify({"error": "Unexpected server error", "details": str(e)}), 500
+        print(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# Run Flask (Render uses gunicorn)
+# Run Flask
 # -----------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"Backend running at http://0.0.0.0:{port}")
-    app.run(host="0.0.0.0", port=port, debug=True)
+    print(f"Backend running at: http://0.0.0.0:{port}")
+    app.run(host="0.0.0.0", port=port)
