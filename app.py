@@ -21,25 +21,8 @@ else:
 # Flask app + CORS
 # -----------------------------
 app = Flask(__name__)
-CORS(app, origins=["*"], supports_credentials=True)  # Allow any origin for now
-
-# -----------------------------
-# Root route
-# -----------------------------
-@app.route("/", methods=["GET"])
-def index():
-    return """
-    <h2>Resume Analyzer API</h2>
-    <p>POST to <code>/analyze</code> with resume PDF and jobRole to analyze.</p>
-    <p>Check health at <a href="/health">/health</a></p>
-    """, 200
-
-# -----------------------------
-# Health check
-# -----------------------------
-@app.route("/health", methods=["GET"])
-def health():
-    return {"status": "ok", "gemini_configured": bool(GEMINI_API_KEY)}
+# You can allow all origins or restrict to your frontend URL
+CORS(app, supports_credentials=True)
 
 # -----------------------------
 # Utility: extract text from PDF
@@ -57,31 +40,35 @@ def extract_text_from_pdf(pdf_file):
     return text.strip()
 
 # -----------------------------
+# Health check
+# -----------------------------
+@app.route("/health", methods=["GET"])
+def health():
+    return {"status": "ok", "gemini_configured": bool(GEMINI_API_KEY)}
+
+# -----------------------------
 # Analyze resume
 # -----------------------------
-@app.route("/analyze", methods=["POST", "OPTIONS"])
+@app.route("/analyze", methods=["POST"])
 def analyze_resume():
-    if request.method == "OPTIONS":
-        response = jsonify({"status": "ok"})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
-        response.headers.add("Access-Control-Allow-Methods", "POST")
-        return response, 200
-
     try:
         if not GEMINI_API_KEY:
             return jsonify({"error": "GEMINI_API_KEY not set"}), 500
 
+        # Check if required fields exist
         if "resume" not in request.files or "jobRole" not in request.form:
-            return jsonify({"error": "Missing resume or job role"}), 400
+            return jsonify({"error": "Missing resume or jobRole"}), 400
 
         resume_file = request.files["resume"]
         job_role = request.form["jobRole"]
 
+        # Extract text from PDF
         resume_text = extract_text_from_pdf(resume_file)
         if not resume_text:
             return jsonify({"error": "Could not extract text from resume"}), 400
 
+        # Prepare prompt for AI
+        valid_model_name = "models/gemini-2.5-flash"
         prompt = f"""
 You are an AI interview coach. Analyze the following resume for the role: {job_role}.
 
@@ -94,19 +81,25 @@ Provide:
 - Suggestions to improve resume for this job role.
 """
 
-        model = genai.GenerativeModel("models/gemini-2.5-flash")
-        response = model.generate_content(prompt)
-        analysis_text = response.text
+        # Generate AI response safely
+        try:
+            model = genai.GenerativeModel(valid_model_name)
+            response = model.generate_content(prompt)
+            analysis_text = response.text
+        except Exception as ai_err:
+            print("AI model call failed:", ai_err)
+            return jsonify({"error": "AI model failed", "details": str(ai_err)}), 500
 
-        return jsonify({"analysis": analysis_text, "model_used": "gemini-2.5-flash"})
+        return jsonify({"analysis": analysis_text, "model_used": valid_model_name})
 
     except Exception as e:
-        print(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+        print("Unexpected error:", traceback.format_exc())
+        return jsonify({"error": "Unexpected server error", "details": str(e)}), 500
 
 # -----------------------------
-# Run Flask (Render sets $PORT)
+# Run Flask (Render uses gunicorn)
 # -----------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    print(f"Backend running at http://0.0.0.0:{port}")
     app.run(host="0.0.0.0", port=port, debug=True)
