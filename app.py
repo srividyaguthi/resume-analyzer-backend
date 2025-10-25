@@ -39,6 +39,14 @@ def extract_text_from_pdf(pdf_file):
         print(f"PDF extraction error: {e}")
     return text.strip()
 
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "message": "Resume Analyzer Backend is running successfully 🎉",
+        "status": "live",
+        "available_endpoints": ["/health", "/analyze"]
+    })
+
 # -----------------------------
 # Health check
 # -----------------------------
